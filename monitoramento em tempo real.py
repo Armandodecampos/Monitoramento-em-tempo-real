@@ -344,19 +344,35 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor
             const idRegistro = `reg-${dados.id_usuario}-${dados.data_evento.replace(/[^0-9]/g, '_')}`;
             let elementoExistente = document.getElementById(idRegistro);
             
-            // Se já existe e já tem foto, não faz nada
-            if (elementoExistente && elementoExistente.dataset.temFoto === "true") {
-                // Apenas atualiza o leitor se vier vazio no original
+            // Se já existe, tenta preservar dados mais específicos (Leitor e Dispositivo) antes de atualizar
+            if (elementoExistente) {
                 const leitorEl = elementoExistente.querySelector('.leitor-text');
-                if (leitorEl && !leitorEl.textContent.trim() && dados.leitor) {
-                    leitorEl.textContent = `📍 ${dados.leitor}`;
-                }
-                // Atualiza dispositivo se vier vazio ou "Geral" no original
                 const dispEl = elementoExistente.querySelector('.disp-text');
-                if (dispEl && (!dispEl.textContent.trim() || dispEl.textContent.includes("Geral")) && dados.dispositivo && dados.dispositivo !== "Geral") {
-                    dispEl.textContent = `🖥️ ${dados.dispositivo}`;
+
+                const leitorAtual = leitorEl ? (leitorEl.dataset.leitor || leitorEl.textContent.replace('📍', '').trim()) : "";
+                const dispAtual = dispEl ? (dispEl.dataset.dispositivo || dispEl.textContent.replace('🖥️', '').trim()) : "";
+
+                // Preserva o leitor se o atual for preenchido e o novo for vazio
+                if (leitorAtual && !dados.leitor) {
+                    dados.leitor = leitorAtual;
                 }
-                return;
+                // Preserva o dispositivo se o atual for específico e o novo for "Geral" ou vazio
+                if (dispAtual && dispAtual !== "Geral" && (!dados.dispositivo || dados.dispositivo === "Geral")) {
+                    dados.dispositivo = dispAtual;
+                }
+
+                // Se já tem foto, apenas atualiza os textos se necessário e encerra
+                if (elementoExistente.dataset.temFoto === "true") {
+                    if (leitorEl && (!leitorEl.dataset.leitor || !leitorEl.dataset.leitor.trim()) && dados.leitor) {
+                        leitorEl.dataset.leitor = dados.leitor;
+                        leitorEl.textContent = `📍 ${dados.leitor}`;
+                    }
+                    if (dispEl && (!dispEl.dataset.dispositivo || dispEl.dataset.dispositivo === "Geral") && dados.dispositivo && dados.dispositivo !== "Geral") {
+                        dispEl.dataset.dispositivo = dados.dispositivo;
+                        dispEl.textContent = `🖥️ ${dados.dispositivo}`;
+                    }
+                    return;
+                }
             }
 
             const msgVazia = document.getElementById('mensagem-vazia');
@@ -364,8 +380,8 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor
 
             const horaSimplificada = dados.data_evento.split(' ')[1] || dados.data_evento;
             const divEventoHtml = dados.evento ? `<div style="font-size: 10px; color: #facc15; font-weight: 500; margin-top: 1px;">${dados.evento}</div>` : '';
-            const spanDisp = `<span class="disp-text" style="color: #cbd5e1; font-size: 10px; font-weight: 500;">${dados.dispositivo ? '🖥️ ' + dados.dispositivo : ''}</span>`;
-            const spanLeitor = `<span class="leitor-text" style="color: #2dd4bf; font-weight: bold; font-size: 10px;">${dados.leitor ? '📍 ' + dados.leitor : ''}</span>`;
+            const spanDisp = `<span class="disp-text" data-dispositivo="${dados.dispositivo || ''}" style="color: #cbd5e1; font-size: 10px; font-weight: 500;">${dados.dispositivo ? '🖥️ ' + dados.dispositivo : ''}</span>`;
+            const spanLeitor = `<span class="leitor-text" data-leitor="${dados.leitor || ''}" style="color: #2dd4bf; font-weight: bold; font-size: 10px;">${dados.leitor ? '📍 ' + dados.leitor : ''}</span>`;
 
             const htmlConteudo = `
                 <div style="display: flex; gap: 12px; align-items: center;">
