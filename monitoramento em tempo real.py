@@ -85,8 +85,8 @@ def salvar_foto(base64_data, id_usuario, data_evento):
         return ""
 
 
-def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_foto, page, apenas_log_inferior=False, pular_log_inferior=False):
-    """Registra as informações capturadas no CSV, no HTML e injeta nos containers da barra lateral."""
+def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_foto, page):
+    """Registra as informações capturadas no CSV, no HTML e injeta na lista unificada."""
     caminho_foto_local = ""
     if base64_foto:
         caminho_foto_local = salvar_foto(base64_foto, id_usuario, data_evento)
@@ -125,16 +125,8 @@ def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_
     # Atualiza Relatório HTML em disco
     atualizar_relatorio_html()
     
-    # Injeta na barra lateral correspondente
-    if apenas_log_inferior:
-        injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositivo, data_evento)
-    else:
-        # Se veio com foto (do popup), injetamos no painel de fotos
-        injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_foto, data_evento)
-
-        # Injeta no painel inferior apenas se não for para pular
-        if not pular_log_inferior:
-            injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositivo, data_evento)
+    # Injeta na lista unificada
+    injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_evento, base64_foto)
 
 
 def atualizar_relatorio_html():
@@ -264,7 +256,7 @@ def criar_estrutura_barra_lateral(page):
             sidebar.style.zIndex = '2147483647';
             sidebar.style.transition = 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)';
 
-            // Layout com dois containers verticais principais usando Flexbox flex-basis de 50% cada
+            // Layout com container único para registros unificados
             sidebar.innerHTML = `
                 <!-- CABEÇALHO DO PAINEL GERAL -->
                 <div style="padding: 12px 16px; border-bottom: 1px solid #374151; background-color: #1f2937; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-shrink: 0;">
@@ -277,28 +269,15 @@ def criar_estrutura_barra_lateral(page):
                     </button>
                 </div>
 
-                <!-- CONTAINER SUPERIOR: HISTÓRICO DE ACESSOS COM FOTO -->
-                <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; border-bottom: 3px solid #374151;">
-                    <div style="padding: 8px 16px; background-color: #1f2937; border-bottom: 1px solid #2d3748; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
-                        <span style="font-size: 12px; font-weight: bold; color: #2dd4bf; text-transform: uppercase; letter-spacing: 0.5px;">Últimos Acessos com Foto</span>
-                        <span style="font-size: 10px; color: #9ca3af;" id="contador-acessos">0 total</span>
-                    </div>
-                    <div id="lista-acessos" style="padding: 12px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 10px; background-color: #111827;">
-                        <div id="mensagem-vazia" style="text-align: center; color: #6b7280; padding: 30px 10px; font-size: 12px; font-style: italic;">
-                            Aguardando novos acessos biométricos...
-                        </div>
-                    </div>
-                </div>
-
-                <!-- CONTAINER INFERIOR: EVENTOS EM TEMPO REAL -->
+                <!-- CONTAINER ÚNICO: HISTÓRICO DE ACESSOS UNIFICADO -->
                 <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; background-color: #0b0f19;">
                     <div style="padding: 8px 16px; background-color: #1a202c; border-bottom: 1px solid #2d3748; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
-                        <span style="font-size: 12px; font-weight: bold; color: #f59e0b; text-transform: uppercase; letter-spacing: 0.5px;">Eventos em Tempo Real</span>
-                        <span style="font-size: 10px; color: #9ca3af;" id="contador-logs">0 logs</span>
+                        <span style="font-size: 12px; font-weight: bold; color: #2dd4bf; text-transform: uppercase; letter-spacing: 0.5px;">Eventos em Tempo Real</span>
+                        <span style="font-size: 10px; color: #9ca3af;" id="contador-registros">0 total</span>
                     </div>
-                    <div id="lista-eventos-tempo-real" style="padding: 12px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; font-family: monospace; font-size: 11px; background-color: #070a13;">
-                        <div id="mensagem-vazia-eventos" style="text-align: center; color: #4b5563; padding: 30px 10px; font-style: italic;">
-                            Aguardando tráfego de dados...
+                    <div id="lista-eventos-unificada" style="padding: 12px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 10px; background-color: #111827;">
+                        <div id="mensagem-vazia" style="text-align: center; color: #6b7280; padding: 30px 10px; font-size: 12px; font-style: italic;">
+                            Aguardando novos eventos biométricos...
                         </div>
                     </div>
                 </div>
@@ -332,133 +311,98 @@ def criar_estrutura_barra_lateral(page):
         print(f"[!] Erro ao injetar estrutura da barra lateral segura: {e}")
 
 
-def injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_foto, data_evento):
-    """Adiciona de forma exclusiva o card de acesso com foto ao container superior."""
+def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_evento, base64_foto=""):
+    """Injeta ou atualiza um registro na lista unificada, priorizando fotos."""
     try:
-        src_imagem = base64_foto if base64_foto else "/images/userImage.gif"
+        src_imagem = base64_foto if base64_foto else ""
         
-        js_superior = """
+        js_unificado = """
         (dados) => {
-            const listaAcessos = document.getElementById('lista-acessos');
-            if (!listaAcessos) return;
+            const lista = document.getElementById('lista-eventos-unificada');
+            if (!lista) return;
 
-            // Identificador único para evitar duplicados no DOM
-            const idCard = `card-sup-${dados.id_usuario}-${dados.data_evento.replace(/[^0-9]/g, '_')}`;
-            if (document.getElementById(idCard)) return;
+            const idRegistro = `reg-${dados.id_usuario}-${dados.data_evento.replace(/[^0-9]/g, '_')}`;
+            let elementoExistente = document.getElementById(idRegistro);
             
-            const msgVaziaAcessos = document.getElementById('mensagem-vazia');
-            if (msgVaziaAcessos) msgVaziaAcessos.remove();
-
-            const card = document.createElement('div');
-            card.id = idCard;
-            card.style.backgroundColor = '#1f2937';
-            card.style.border = '1px solid #374151';
-            card.style.borderRadius = '6px';
-            card.style.padding = '8px';
-            card.style.display = 'flex';
-            card.style.gap = '10px';
-            card.style.alignItems = 'center';
-            card.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
-            card.style.animation = 'fadeIn 0.4s ease';
-
-            const divEventoHtml = dados.evento ? `<div style="font-size: 10px; color: #facc15; font-weight: 500;">${dados.evento}</div>` : '';
-
-            card.innerHTML = `
-                <img src="${dados.src_imagem}" style="width: 55px; height: 55px; border-radius: 4px; object-fit: cover; border: 1px solid #4b5563; background-color: #030712;" onerror="this.src='/images/userImage.gif'">
-                <div style="flex: 1; min-width: 0;">
-                    <div style="font-size: 10px; background-color: rgba(20, 184, 166, 0.15); color: #2dd4bf; display: inline-block; padding: 1px 4px; border-radius: 3px; font-weight: bold;">
-                        ID: ${dados.id_usuario}
-                    </div>
-                    <div style="font-size: 12px; font-weight: bold; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;" title="${dados.nome}">
-                        ${dados.nome}
-                    </div>
-                    ${divEventoHtml}
-                </div>
-            `;
-
-            listaAcessos.insertBefore(card, listaAcessos.firstChild);
-            
-            const contAcessos = document.getElementById('contador-acessos');
-            if (contAcessos) {
-                const total = listaAcessos.querySelectorAll('div[style*="background-color: rgb(31, 41, 55)"]').length;
-                contAcessos.textContent = `${total} total`;
+            // Se já existe e já tem foto, não faz nada
+            if (elementoExistente && elementoExistente.dataset.temFoto === "true") {
+                return;
             }
-        }
-        """
-        page.evaluate(js_superior, {
-            "id_usuario": id_usuario,
-            "nome": nome,
-            "evento": evento,
-            "src_imagem": src_imagem,
-            "data_evento": data_evento
-        })
-    except Exception as e:
-        print(f"[-] Erro ao atualizar painel superior: {e}")
 
-
-def injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositivo, data_evento):
-    """Injeta logs detalhados e simplificados estilo terminal no painel inferior para todos os acessos."""
-    try:
-        js_inferior = """
-        (dados) => {
-            const listaLogs = document.getElementById('lista-eventos-tempo-real');
-            if (!listaLogs) return;
-
-            // Identificador único para evitar duplicados no DOM
-            const idLog = `log-inf-${dados.id_usuario}-${dados.data_evento.replace(/[^0-9]/g, '_')}`;
-            if (document.getElementById(idLog)) return;
-            
-            const msgVaziaLogs = document.getElementById('mensagem-vazia-eventos');
-            if (msgVaziaLogs) msgVaziaLogs.remove();
-
-            const logRow = document.createElement('div');
-            logRow.id = idLog;
-            logRow.style.padding = '8px';
-            logRow.style.borderRadius = '4px';
-            logRow.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
-            logRow.style.borderLeft = '3px solid #f59e0b';
-            logRow.style.display = 'flex';
-            logRow.style.flexDirection = 'column';
-            logRow.style.gap = '4px';
-            logRow.style.animation = 'fadeIn 0.3s ease';
+            const msgVazia = document.getElementById('mensagem-vazia');
+            if (msgVazia) msgVazia.remove();
 
             const horaSimplificada = dados.data_evento.split(' ')[1] || dados.data_evento;
-            const spanDisp = dados.dispositivo ? `<span style="color: #10b981; font-weight: bold;">🖥️ ${dados.dispositivo}</span>` : '';
-            const divLogEvento = dados.evento ? `<div style="color: #94a3b8; font-size: 10px; padding-left: 2px; font-weight: 500;">⚙️ ${dados.evento}</div>` : '';
+            const divEventoHtml = dados.evento ? `<div style="font-size: 10px; color: #facc15; font-weight: 500;">${dados.evento}</div>` : '';
+            const spanDisp = dados.dispositivo ? `<span style="color: #10b981; font-weight: bold; font-size: 10px;">🖥️ ${dados.dispositivo}</span>` : '';
 
-            logRow.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: center; color: #9ca3af; font-size: 10px;">
-                    <span style="color: #f59e0b; font-weight: bold;">🕒 ${horaSimplificada}</span>
-                    ${spanDisp}
+            const htmlConteudo = `
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    ${dados.src_imagem ?
+                        `<img src="${dados.src_imagem}" style="width: 50px; height: 50px; border-radius: 4px; object-fit: cover; border: 1px solid #4b5563; background-color: #030712;" onerror="this.src='/images/userImage.gif'">` :
+                        `<div style="width: 50px; height: 50px; border-radius: 4px; background-color: #1f2937; border: 1px solid #374151; display: flex; align-items: center; justify-content: center; color: #4b5563; font-size: 20px;">👤</div>`
+                    }
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                            <div style="font-size: 10px; background-color: rgba(20, 184, 166, 0.15); color: #2dd4bf; display: inline-block; padding: 1px 4px; border-radius: 3px; font-weight: bold;">
+                                ID: ${dados.id_usuario}
+                            </div>
+                            <span style="color: #f59e0b; font-weight: bold; font-size: 10px;">🕒 ${horaSimplificada}</span>
+                        </div>
+                        <div style="font-size: 12px; font-weight: bold; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${dados.nome}">
+                            ${dados.nome}
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                            ${divEventoHtml}
+                            ${spanDisp}
+                        </div>
+                    </div>
                 </div>
-                <div style="color: #e2e8f0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 2px;">
-                    <strong>${dados.nome}</strong> <span style="color: #9ca3af; font-size: 10px;">(ID: ${dados.id_usuario})</span>
-                </div>
-                ${divLogEvento}
             `;
 
-            listaLogs.insertBefore(logRow, listaLogs.firstChild);
+            if (elementoExistente) {
+                // Atualiza o elemento existente (Upgrade para foto)
+                elementoExistente.innerHTML = htmlConteudo;
+                elementoExistente.dataset.temFoto = dados.src_imagem ? "true" : "false";
+                elementoExistente.style.borderLeft = dados.src_imagem ? '4px solid #14b8a6' : '4px solid #f59e0b';
+            } else {
+                // Cria novo elemento
+                const novoReg = document.createElement('div');
+                novoReg.id = idRegistro;
+                novoReg.dataset.temFoto = dados.src_imagem ? "true" : "false";
+                novoReg.style.backgroundColor = '#1f2937';
+                novoReg.style.border = '1px solid #374151';
+                novoReg.style.borderLeft = dados.src_imagem ? '4px solid #14b8a6' : '4px solid #f59e0b';
+                novoReg.style.borderRadius = '6px';
+                novoReg.style.padding = '10px';
+                novoReg.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+                novoReg.style.animation = 'fadeIn 0.4s ease';
+                novoReg.innerHTML = htmlConteudo;
 
-            while (listaLogs.childNodes.length > 50) {
-                listaLogs.removeChild(listaLogs.lastChild);
+                lista.insertBefore(novoReg, lista.firstChild);
             }
 
-            const contLogs = document.getElementById('contador-logs');
-            if (contLogs) {
-                const totalLogs = listaLogs.children.length;
-                contLogs.textContent = `${totalLogs} logs`;
+            while (lista.childNodes.length > 50) {
+                lista.removeChild(lista.lastChild);
+            }
+
+            const contReg = document.getElementById('contador-registros');
+            if (contReg) {
+                const total = lista.querySelectorAll('div[id^="reg-"]').length;
+                contReg.textContent = `${total} total`;
             }
         }
         """
-        page.evaluate(js_inferior, {
+        page.evaluate(js_unificado, {
             "id_usuario": id_usuario,
             "nome": nome,
             "evento": evento,
             "dispositivo": dispositivo,
-            "data_evento": data_evento
+            "data_evento": data_evento,
+            "src_imagem": src_imagem
         })
     except Exception as e:
-        print(f"[-] Erro ao atualizar painel inferior: {e}")
+        print(f"[-] Erro ao atualizar lista unificada: {e}")
 
 
 def extrair_dados_notificacao(html_interno):
@@ -630,8 +574,8 @@ def executar_monitoramento():
                             chave_evento = f"{id_usuario}_{data_evento}_{dispositivo}"
                             
                             if chave_evento not in ultimos_eventos_processados:
-                                # Registra e envia ao painel inferior (apenas log em tempo real)
-                                registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, "", page, apenas_log_inferior=True)
+                                # Registra e envia à lista unificada sem foto
+                                registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, "", page)
                                 ultimos_eventos_processados.add(chave_evento)
                                 
                         # --- ORIGEM 2: CAPTURA DO POP-UP (Para anexar as fotos no painel superior) ---
@@ -655,11 +599,8 @@ def executar_monitoramento():
                                     # Se detectamos a foto e o popup do usuário
                                     if base64_foto:
                                         if chave_evento not in eventos_com_foto_processados:
-                                            # Verifica se já registramos esse evento sem foto anteriormente
-                                            ja_logado = chave_evento in ultimos_eventos_processados
-
-                                            # Registra/Sincroniza preenchendo a foto no CSV e atualizando painéis
-                                            registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto, page, apenas_log_inferior=False, pular_log_inferior=ja_logado)
+                                            # Registra/Sincroniza preenchendo a foto no CSV e atualizando a lista unificada
+                                            registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto, page)
 
                                             ultimos_eventos_processados.add(chave_evento)
                                             eventos_com_foto_processados.add(chave_evento)
