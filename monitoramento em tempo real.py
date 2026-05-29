@@ -22,20 +22,24 @@ ARQUIVO_HTML = os.path.join(DIRETORIO_SAIDA, "relatorio_visual.html")
 # Cria as pastas caso não existam
 os.makedirs(DIRETORIO_FOTOS, exist_ok=True)
 
+# Global para sincronizar a data do sistema de monitoramento
+DATA_SISTEMA_ATUAL = datetime.now().strftime("%Y-%m-%d")
+
 
 def normalizar_data(data_str):
     """Garante que a data esteja no formato YYYY-MM-DD HH:MM:SS."""
+    global DATA_SISTEMA_ATUAL
     if not data_str:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f"{DATA_SISTEMA_ATUAL} {datetime.now().strftime('%H:%M:%S')}"
 
-    # Se já estiver no formato correto, retorna
+    # Se já estiver no formato correto, retorna e atualiza a data global
     if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", data_str):
+        DATA_SISTEMA_ATUAL = data_str.split(' ')[0]
         return data_str
 
-    # Se for apenas HH:MM:SS, adiciona a data de hoje
+    # Se for apenas HH:MM:SS, adiciona a data detectada do sistema
     if re.match(r"^\d{2}:\d{2}:\d{2}$", data_str):
-        data_hoje = datetime.now().strftime("%Y-%m-%d")
-        return f"{data_hoje} {data_str}"
+        return f"{DATA_SISTEMA_ATUAL} {data_str}"
 
     return data_str
 
@@ -58,7 +62,7 @@ def inicializar_arquivos():
     if not os.path.exists(ARQUIVO_CSV):
         with open(ARQUIVO_CSV, mode='w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(["Data_Registro", "ID", "Nome", "Evento", "Dispositivo", "Data_Evento", "Caminho_Foto"])
+            writer.writerow(["Data_Registro", "ID", "Nome", "Evento", "Dispositivo", "Leitor", "Data_Evento", "Caminho_Foto"])
 
 
 def salvar_foto(base64_data, id_usuario, data_evento):
@@ -85,7 +89,7 @@ def salvar_foto(base64_data, id_usuario, data_evento):
         return ""
 
 
-def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_foto, page):
+def registrar_evento(id_usuario, nome, evento, dispositivo, leitor, data_evento, base64_foto, page):
     """Registra as informações capturadas no CSV, no HTML e injeta na lista unificada."""
     caminho_foto_local = ""
     if base64_foto:
@@ -101,32 +105,42 @@ def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_
         with open(ARQUIVO_CSV, mode='r', encoding='utf-8') as f:
             reader = csv.reader(f)
             cabecalho = next(reader, None)
+            # Verifica se o cabeçalho já tem a coluna 'Leitor' (migração automática)
+            tem_coluna_leitor = "Leitor" in cabecalho if cabecalho else False
+
             for row in reader:
-                if len(row) >= 7:
-                    # Se encontramos o mesmo registro (ID, Evento e Dispositivo idênticos no mesmo segundo)
-                    if row[1] == id_usuario and row[5] == data_evento and row[4] == dispositivo:
+                # Ajusta linha se for de versão antiga sem a coluna 'Leitor'
+                if not tem_coluna_leitor and len(row) == 7:
+                    row.insert(5, "") # Insere vazio na posição do Leitor
+
+                if len(row) >= 8:
+                    # Se encontramos o mesmo registro (ID e Data do Evento idênticos)
+                    if row[1] == id_usuario and row[6] == data_evento:
                         # Se o registro antigo não tinha foto e agora temos, mesclamos a foto
-                        if not row[6] and caminho_foto_local:
-                            row[6] = caminho_foto_local
+                        if not row[7] and caminho_foto_local:
+                            row[7] = caminho_foto_local
+                        # Atualiza leitor se estiver vazio
+                        if not row[5] and leitor:
+                            row[5] = leitor
                         atualizado = True
                     registros_existentes.append(row)
                     
     if not atualizado:
-        registros_existentes.append([data_registro, id_usuario, nome, evento, dispositivo, data_evento, caminho_foto_local])
+        registros_existentes.append([data_registro, id_usuario, nome, evento, dispositivo, leitor, data_evento, caminho_foto_local])
         
     # Reescreve o CSV de forma limpa
     with open(ARQUIVO_CSV, mode='w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(["Data_Registro", "ID", "Nome", "Evento", "Dispositivo", "Data_Evento", "Caminho_Foto"])
+        writer.writerow(["Data_Registro", "ID", "Nome", "Evento", "Dispositivo", "Leitor", "Data_Evento", "Caminho_Foto"])
         writer.writerows(registros_existentes)
         
-    print(f"[+] REGISTRO SINCRO: {id_usuario} - {nome} | Evento: {evento} | Disp: {dispositivo} | Data: {data_evento}")
+    print(f"[+] REGISTRO SINCRO: {id_usuario} - {nome} | Leitor: {leitor} | Evento: {evento} | Data: {data_evento}")
     
     # Atualiza Relatório HTML em disco
     atualizar_relatorio_html()
     
     # Injeta na lista unificada
-    injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_evento, base64_foto)
+    injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor, data_evento, base64_foto)
 
 
 def atualizar_relatorio_html():
@@ -168,6 +182,8 @@ def atualizar_relatorio_html():
         evento_txt = r.get('Evento', '')
         
         disp_html = f'<p class="text-xs text-gray-400 mt-0.5">Disp: {dispositivo_txt}</p>' if dispositivo_txt else ''
+        leitor_txt = r.get('Leitor', '')
+        leitor_html = f'<p class="text-xs text-teal-400 font-semibold mt-0.5">Leitor: {leitor_txt}</p>' if leitor_txt else ''
         evento_html = f'<p class="text-sm text-yellow-400 font-medium mt-1">{evento_txt}</p>' if evento_txt else ''
         
         html_content += f"""
@@ -181,6 +197,7 @@ def atualizar_relatorio_html():
                     </span>
                     <h3 class="text-lg font-bold text-white truncate">{r['Nome']}</h3>
                     {evento_html}
+                    {leitor_html}
                     {disp_html}
                     
                     <div class="mt-4 pt-3 border-t border-gray-700 text-xs text-gray-400 flex flex-col gap-1">
@@ -311,7 +328,7 @@ def criar_estrutura_barra_lateral(page):
         print(f"[!] Erro ao injetar estrutura da barra lateral segura: {e}")
 
 
-def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_evento, base64_foto=""):
+def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor, data_evento, base64_foto=""):
     """Injeta ou atualiza um registro na lista unificada, priorizando fotos."""
     try:
         src_imagem = base64_foto if base64_foto else ""
@@ -326,6 +343,11 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_e
             
             // Se já existe e já tem foto, não faz nada
             if (elementoExistente && elementoExistente.dataset.temFoto === "true") {
+                // Apenas atualiza o leitor se vier vazio no original
+                const leitorEl = elementoExistente.querySelector('.leitor-text');
+                if (leitorEl && !leitorEl.textContent.trim() && dados.leitor) {
+                    leitorEl.textContent = `📍 ${dados.leitor}`;
+                }
                 return;
             }
 
@@ -333,8 +355,9 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_e
             if (msgVazia) msgVazia.remove();
 
             const horaSimplificada = dados.data_evento.split(' ')[1] || dados.data_evento;
-            const divEventoHtml = dados.evento ? `<div style="font-size: 10px; color: #facc15; font-weight: 500;">${dados.evento}</div>` : '';
-            const spanDisp = dados.dispositivo ? `<span style="color: #10b981; font-weight: bold; font-size: 10px;">🖥️ ${dados.dispositivo}</span>` : '';
+            const divEventoHtml = dados.evento ? `<div style="font-size: 10px; color: #facc15; font-weight: 500; margin-top: 1px;">${dados.evento}</div>` : '';
+            const spanDisp = dados.dispositivo ? `<span style="color: #9ca3af; font-size: 9px;">${dados.dispositivo}</span>` : '';
+            const spanLeitor = `<span class="leitor-text" style="color: #2dd4bf; font-weight: bold; font-size: 10px;">${dados.leitor ? '📍 ' + dados.leitor : ''}</span>`;
 
             const htmlConteudo = `
                 <div style="display: flex; gap: 12px; align-items: center;">
@@ -352,8 +375,11 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, data_e
                         <div style="font-size: 12px; font-weight: bold; color: #ffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${dados.nome}">
                             ${dados.nome}
                         </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                            ${divEventoHtml}
+                        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 3px;">
+                            <div style="display: flex; flex-direction: column;">
+                                ${spanLeitor}
+                                ${divEventoHtml}
+                            </div>
                             ${spanDisp}
                         </div>
                     </div>
@@ -434,7 +460,11 @@ def extrair_dados_notificacao(html_interno):
         if len(p_tags) >= 4:
             dispositivo = p_tags[3].get_text(strip=True)
             
-        return id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto
+        leitor = ""
+        if len(p_tags) >= 5:
+            leitor = p_tags[4].get_text(strip=True)
+
+        return id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto, leitor
         
     return None
 
@@ -450,19 +480,21 @@ def extrair_linhas_tabela_real(frame):
             
             for (const tr of trs) {
                 const tds = tr.querySelectorAll('td');
-                if (tds.length >= 7) {
+                if (tds.length >= 8) {
                     const horario = tds[0].innerText ? tds[0].innerText.trim() : tds[0].textContent.trim();
                     // Garante que o primeiro campo é uma data válida (Formato YYYY-MM-DD HH:MM:SS)
                     if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(horario)) {
                         const dispositivo = tds[2].innerText ? tds[2].innerText.trim() : tds[2].textContent.trim();
                         const evento = tds[4].innerText ? tds[4].innerText.trim() : tds[4].textContent.trim();
                         const pessoa = tds[6].innerText ? tds[6].innerText.trim() : tds[6].textContent.trim();
+                        const leitor = tds[7].innerText ? tds[7].innerText.trim() : tds[7].textContent.trim();
                         
                         resultados.push({
                             horario: horario,
                             dispositivo: dispositivo,
                             evento: evento,
-                            pessoa: pessoa
+                            pessoa: pessoa,
+                            leitor: leitor
                         });
                     }
                 }
@@ -563,6 +595,7 @@ def executar_monitoramento():
                                 
                             evento = linha["evento"]
                             dispositivo = linha["dispositivo"]
+                            leitor = linha["leitor"]
                             data_evento = normalizar_data(linha["horario"])
                             
                             # Sanitização de textos ("Verificação de abertura normal" e "Geral")
@@ -571,11 +604,11 @@ def executar_monitoramento():
                             if dispositivo == "Geral":
                                 dispositivo = ""
                                 
-                            chave_evento = f"{id_usuario}_{data_evento}_{dispositivo}"
+                            chave_evento = f"{id_usuario}_{data_evento}"
                             
                             if chave_evento not in ultimos_eventos_processados:
                                 # Registra e envia à lista unificada sem foto
-                                registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, "", page)
+                                registrar_evento(id_usuario, nome_usuario, evento, dispositivo, leitor, data_evento, "", page)
                                 ultimos_eventos_processados.add(chave_evento)
                                 
                         # --- ORIGEM 2: CAPTURA DO POP-UP (Para anexar as fotos no painel superior) ---
@@ -586,7 +619,7 @@ def executar_monitoramento():
                             if "<p>" in html_interno and "</p>" in html_interno:
                                 dados = extrair_dados_notificacao(html_interno)
                                 if dados:
-                                    id_usuario, nome_usuario, evento, dispositivo, data_evento_raw, base64_foto = dados
+                                    id_usuario, nome_usuario, evento, dispositivo, data_evento_raw, base64_foto, leitor_popup = dados
                                     data_evento = normalizar_data(data_evento_raw)
                                     
                                     if "Verificação de abertura normal" in evento:
@@ -594,13 +627,13 @@ def executar_monitoramento():
                                     if dispositivo == "Geral":
                                         dispositivo = ""
                                         
-                                    chave_evento = f"{id_usuario}_{data_evento}_{dispositivo}"
+                                    chave_evento = f"{id_usuario}_{data_evento}"
                                     
                                     # Se detectamos a foto e o popup do usuário
                                     if base64_foto:
                                         if chave_evento not in eventos_com_foto_processados:
                                             # Registra/Sincroniza preenchendo a foto no CSV e atualizando a lista unificada
-                                            registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto, page)
+                                            registrar_evento(id_usuario, nome_usuario, evento, dispositivo, leitor_popup, data_evento, base64_foto, page)
 
                                             ultimos_eventos_processados.add(chave_evento)
                                             eventos_com_foto_processados.add(chave_evento)
