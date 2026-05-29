@@ -122,6 +122,9 @@ def registrar_evento(id_usuario, nome, evento, dispositivo, leitor, data_evento,
                         # Atualiza leitor se estiver vazio
                         if not row[5] and leitor:
                             row[5] = leitor
+                        # Atualiza dispositivo se estiver vazio ou for "Geral"
+                        if (not row[4] or row[4] == "Geral") and dispositivo and dispositivo != "Geral":
+                            row[4] = dispositivo
                         atualizado = True
                     registros_existentes.append(row)
                     
@@ -181,7 +184,7 @@ def atualizar_relatorio_html():
         dispositivo_txt = r.get('Dispositivo', '')
         evento_txt = r.get('Evento', '')
         
-        disp_html = f'<p class="text-xs text-gray-400 mt-0.5">Disp: {dispositivo_txt}</p>' if dispositivo_txt else ''
+        disp_html = f'<p class="text-sm text-gray-300 font-medium mt-0.5">🖥️ {dispositivo_txt}</p>' if dispositivo_txt else ''
         leitor_txt = r.get('Leitor', '')
         leitor_html = f'<p class="text-xs text-teal-400 font-semibold mt-0.5">Leitor: {leitor_txt}</p>' if leitor_txt else ''
         evento_html = f'<p class="text-sm text-yellow-400 font-medium mt-1">{evento_txt}</p>' if evento_txt else ''
@@ -348,6 +351,11 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor
                 if (leitorEl && !leitorEl.textContent.trim() && dados.leitor) {
                     leitorEl.textContent = `📍 ${dados.leitor}`;
                 }
+                // Atualiza dispositivo se vier vazio ou "Geral" no original
+                const dispEl = elementoExistente.querySelector('.disp-text');
+                if (dispEl && (!dispEl.textContent.trim() || dispEl.textContent.includes("Geral")) && dados.dispositivo && dados.dispositivo !== "Geral") {
+                    dispEl.textContent = `🖥️ ${dados.dispositivo}`;
+                }
                 return;
             }
 
@@ -356,7 +364,7 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor
 
             const horaSimplificada = dados.data_evento.split(' ')[1] || dados.data_evento;
             const divEventoHtml = dados.evento ? `<div style="font-size: 10px; color: #facc15; font-weight: 500; margin-top: 1px;">${dados.evento}</div>` : '';
-            const spanDisp = dados.dispositivo ? `<span style="color: #9ca3af; font-size: 9px;">${dados.dispositivo}</span>` : '';
+            const spanDisp = `<span class="disp-text" style="color: #cbd5e1; font-size: 10px; font-weight: 500;">${dados.dispositivo ? '🖥️ ' + dados.dispositivo : ''}</span>`;
             const spanLeitor = `<span class="leitor-text" style="color: #2dd4bf; font-weight: bold; font-size: 10px;">${dados.leitor ? '📍 ' + dados.leitor : ''}</span>`;
 
             const htmlConteudo = `
@@ -424,6 +432,7 @@ def injetar_evento_unificado(page, id_usuario, nome, evento, dispositivo, leitor
             "nome": nome,
             "evento": evento,
             "dispositivo": dispositivo,
+            "leitor": leitor,
             "data_evento": data_evento,
             "src_imagem": src_imagem
         })
