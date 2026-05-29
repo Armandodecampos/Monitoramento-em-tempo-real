@@ -23,6 +23,23 @@ ARQUIVO_HTML = os.path.join(DIRETORIO_SAIDA, "relatorio_visual.html")
 os.makedirs(DIRETORIO_FOTOS, exist_ok=True)
 
 
+def normalizar_data(data_str):
+    """Garante que a data esteja no formato YYYY-MM-DD HH:MM:SS."""
+    if not data_str:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Se já estiver no formato correto, retorna
+    if re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", data_str):
+        return data_str
+
+    # Se for apenas HH:MM:SS, adiciona a data de hoje
+    if re.match(r"^\d{2}:\d{2}:\d{2}$", data_str):
+        data_hoje = datetime.now().strftime("%Y-%m-%d")
+        return f"{data_hoje} {data_str}"
+
+    return data_str
+
+
 def obter_resolucao_tela():
     """Detecta dinamicamente a largura e altura da tela física do usuário."""
     try:
@@ -68,7 +85,7 @@ def salvar_foto(base64_data, id_usuario, data_evento):
         return ""
 
 
-def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_foto, page, apenas_log_inferior=False):
+def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_foto, page, apenas_log_inferior=False, pular_log_inferior=False):
     """Registra as informações capturadas no CSV, no HTML e injeta nos containers da barra lateral."""
     caminho_foto_local = ""
     if base64_foto:
@@ -112,9 +129,12 @@ def registrar_evento(id_usuario, nome, evento, dispositivo, data_evento, base64_
     if apenas_log_inferior:
         injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositivo, data_evento)
     else:
-        # Se veio com foto (do popup), injetamos no painel de fotos e no painel inferior
-        injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_foto)
-        injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositivo, data_evento)
+        # Se veio com foto (do popup), injetamos no painel de fotos
+        injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_foto, data_evento)
+
+        # Injeta no painel inferior apenas se não for para pular
+        if not pular_log_inferior:
+            injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositivo, data_evento)
 
 
 def atualizar_relatorio_html():
@@ -312,7 +332,7 @@ def criar_estrutura_barra_lateral(page):
         print(f"[!] Erro ao injetar estrutura da barra lateral segura: {e}")
 
 
-def injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_foto):
+def injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_foto, data_evento):
     """Adiciona de forma exclusiva o card de acesso com foto ao container superior."""
     try:
         src_imagem = base64_foto if base64_foto else "/images/userImage.gif"
@@ -321,11 +341,16 @@ def injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_fot
         (dados) => {
             const listaAcessos = document.getElementById('lista-acessos');
             if (!listaAcessos) return;
+
+            // Identificador único para evitar duplicados no DOM
+            const idCard = `card-sup-${dados.id_usuario}-${dados.data_evento.replace(/[^0-9]/g, '_')}`;
+            if (document.getElementById(idCard)) return;
             
             const msgVaziaAcessos = document.getElementById('mensagem-vazia');
             if (msgVaziaAcessos) msgVaziaAcessos.remove();
 
             const card = document.createElement('div');
+            card.id = idCard;
             card.style.backgroundColor = '#1f2937';
             card.style.border = '1px solid #374151';
             card.style.borderRadius = '6px';
@@ -364,7 +389,8 @@ def injetar_evento_no_painel_superior(page, id_usuario, nome, evento, base64_fot
             "id_usuario": id_usuario,
             "nome": nome,
             "evento": evento,
-            "src_imagem": src_imagem
+            "src_imagem": src_imagem,
+            "data_evento": data_evento
         })
     except Exception as e:
         print(f"[-] Erro ao atualizar painel superior: {e}")
@@ -377,11 +403,16 @@ def injetar_evento_no_painel_inferior(page, id_usuario, nome, evento, dispositiv
         (dados) => {
             const listaLogs = document.getElementById('lista-eventos-tempo-real');
             if (!listaLogs) return;
+
+            // Identificador único para evitar duplicados no DOM
+            const idLog = `log-inf-${dados.id_usuario}-${dados.data_evento.replace(/[^0-9]/g, '_')}`;
+            if (document.getElementById(idLog)) return;
             
             const msgVaziaLogs = document.getElementById('mensagem-vazia-eventos');
             if (msgVaziaLogs) msgVaziaLogs.remove();
 
             const logRow = document.createElement('div');
+            logRow.id = idLog;
             logRow.style.padding = '8px';
             logRow.style.borderRadius = '4px';
             logRow.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
@@ -559,6 +590,7 @@ def executar_monitoramento():
         
         # Caches locais para evitar repetição/duplicidade
         ultimos_eventos_processados = set()
+        eventos_com_foto_processados = set()
         
         while True:
             try:
@@ -587,7 +619,7 @@ def executar_monitoramento():
                                 
                             evento = linha["evento"]
                             dispositivo = linha["dispositivo"]
-                            data_evento = linha["horario"]
+                            data_evento = normalizar_data(linha["horario"])
                             
                             # Sanitização de textos ("Verificação de abertura normal" e "Geral")
                             if "Verificação de abertura normal" in evento:
@@ -610,7 +642,8 @@ def executar_monitoramento():
                             if "<p>" in html_interno and "</p>" in html_interno:
                                 dados = extrair_dados_notificacao(html_interno)
                                 if dados:
-                                    id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto = dados
+                                    id_usuario, nome_usuario, evento, dispositivo, data_evento_raw, base64_foto = dados
+                                    data_evento = normalizar_data(data_evento_raw)
                                     
                                     if "Verificação de abertura normal" in evento:
                                         evento = evento.replace("Verificação de abertura normal", "").strip()
@@ -621,9 +654,15 @@ def executar_monitoramento():
                                     
                                     # Se detectamos a foto e o popup do usuário
                                     if base64_foto:
-                                        # Registra/Sincroniza preenchendo a foto no CSV e atualizando ambos painéis
-                                        registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto, page, apenas_log_inferior=False)
-                                        ultimos_eventos_processados.add(chave_evento)
+                                        if chave_evento not in eventos_com_foto_processados:
+                                            # Verifica se já registramos esse evento sem foto anteriormente
+                                            ja_logado = chave_evento in ultimos_eventos_processados
+
+                                            # Registra/Sincroniza preenchendo a foto no CSV e atualizando painéis
+                                            registrar_evento(id_usuario, nome_usuario, evento, dispositivo, data_evento, base64_foto, page, apenas_log_inferior=False, pular_log_inferior=ja_logado)
+
+                                            ultimos_eventos_processados.add(chave_evento)
+                                            eventos_com_foto_processados.add(chave_evento)
                                         
                     except Exception:
                         continue
@@ -631,6 +670,7 @@ def executar_monitoramento():
                 # Mantém cache sob controle
                 if len(ultimos_eventos_processados) > 1000:
                     ultimos_eventos_processados.clear()
+                    eventos_com_foto_processados.clear()
                     
                 # Sincronização ágil de 250ms
                 page.wait_for_timeout(250)
